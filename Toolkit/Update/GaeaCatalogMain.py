@@ -42,7 +42,7 @@ class GaeaCatalogMain():
 
     def refreshLastWidgets(self):
         self.var_processLast = None
-        self.btn_processLast = Button(self.window, text='Process Last Catalog', command=lambda : self.onClickLast(self.var_processLast))
+        self.btn_processLast = Button(self.window, text='Process Last Catalog', command=lambda: self.onClickLast(self.var_processLast))
         self.btn_processLast.grid(row=self.row_processLast, column=0, columnspan=2, sticky=W+E+N+S)
 
         Label(self.window, text='last Catalog').grid(row=self.row_lastCatalog, sticky=E, pady=5)
@@ -217,26 +217,22 @@ class GaeaCatalogMain():
                 if self.lastCatalogData and (key in self.lastCatalogData['assets']) and self.lastCatalogData['assets'][key]['md5'] == md5str:
                     passdataCatalog['assets'][key] = {
                         'md5': md5str,
-                        'url1': self.lastCatalogData['assets'][key]['url1'],
-                        'url2': self.lastCatalogData['assets'][key]['url2'],
                         'size': self.lastCatalogData['assets'][key]['size'],
                     }
                 else:
                     passdataCatalog['assets'][key] = {
                         'md5': md5str,
-                        'url1': os.path.join(self.var_cdn1.get(), key).replace('\\', '/'),
-                        'url2': os.path.join(self.var_cdn2.get(), key).replace('\\', '/'),
                         'size': os.path.getsize(os.path.join(root, file)),
                     }
                     # 记录差异文件
                     self.differences.append(key)
-        targetdir = os.path.abspath(os.path.join(self.var_localRootPath.get(), os.path.pardir, '{0}_{1}'.format(self.var_platform.get(), self.var_version.get())))
+        targetdir = os.path.abspath(os.path.join(self.var_localRootPath.get(), os.path.pardir, '{0}_{1}'.format(self.var_platform.get(), self.var_version.get().replace('.', '_'))))
         try:
             os.mkdir(targetdir)
         except Exception as e:
             self.debugLog(e)
-        catalogFileName = '{0}_{1}.catalog'.format(self.var_platform.get(), self.var_version.get())
-        versionFileName = 'version'
+        catalogFileName = 'catalog_{0}_{1}.json'.format(self.var_platform.get(), self.var_version.get().replace('.', '_'))
+        versionFileName = 'version.json'
         # 写入catalog文件
         with open(os.path.join(targetdir, catalogFileName), 'w') as f:
             json.dump(passdataCatalog, f)

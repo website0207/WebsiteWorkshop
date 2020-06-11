@@ -95,4 +95,30 @@ public static class EnvironmentVariables
             return _AnnouncementPath;
         }
     }
+
+    private static string _UnzipAssetsRoot;
+    public static string UnzipAssetsRoot
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(_UnzipAssetsRoot))
+            {
+                _UnzipAssetsRoot = Path.Combine(Application.persistentDataPath, "UnzipAssets");
+            }
+            return _UnzipAssetsRoot;
+        }
+    }
+
+    private static string _UnzipAssetsTemp;
+    public static string UnzipAssetsTemp
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(_UnzipAssetsTemp))
+            {
+                _UnzipAssetsTemp = Path.Combine(Application.persistentDataPath, "UnzipAssets", "temp");
+            }
+            return _UnzipAssetsTemp;
+        }
+    }
 }

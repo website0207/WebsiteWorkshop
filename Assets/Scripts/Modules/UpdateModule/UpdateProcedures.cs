@@ -8,6 +8,8 @@ using LitJson;
 using System;
 using System.Linq;
 using WebsiteWorkshop.Frameworks;
+using ICSharpCode.SharpZipLib.Zip;
+using ICSharpCode.SharpZipLib.Core;
 
 namespace WebsiteWorkshop.Modules.UpdateModule
 {
@@ -48,6 +50,23 @@ namespace WebsiteWorkshop.Modules.UpdateModule
             }
         }
         private List<AssetDownloadData> _downloadList;
+        /// <summary>
+        /// 下载压缩包的信息
+        /// </summary>
+        public JsonData RemotePackage { get; set; }
+
+        public AndroidJavaObject Activity
+        {
+            get
+            {
+                if (_activity == null)
+                {
+                    _activity = new AndroidJavaClass("com.unity3d.player.UnityPlayer").GetStatic<AndroidJavaObject>("currentActivity");
+                }
+                return _activity;
+            }
+        }
+        private AndroidJavaObject _activity;
     }
 
     public class LocalProcedure : BaseProcedure
@@ -304,7 +323,8 @@ namespace WebsiteWorkshop.Modules.UpdateModule
         protected override bool CheckDependency()
         {
             return UpdateSharedData.Instance.LocalCatalog != null 
-                && UpdateSharedData.Instance.RemoteCatalog != null;
+                && UpdateSharedData.Instance.RemoteCatalog != null
+                && UpdateSharedData.Instance.RemoteVersion != null;
         }
         protected override void HandleProcedure()
         {
@@ -399,8 +419,15 @@ namespace WebsiteWorkshop.Modules.UpdateModule
                 {
                     AssetDownloadData data = new AssetDownloadData();
                     data.localPath = item;
-                    data.uri1 = (string)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["url1"];
-                    data.uri2 = (string)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["url2"];
+                    Uri result;
+                    if (Uri.TryCreate(new Uri((string)UpdateSharedData.Instance.RemoteVersion["cdn1"]), item, out result))
+                    {
+                        data.uri1 = result.ToString();
+                    }
+                    if (Uri.TryCreate(new Uri((string)UpdateSharedData.Instance.RemoteVersion["cdn2"]), item, out result))
+                    {
+                        data.uri2 = result.ToString();
+                    }
                     data.size = ((int)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["size"]) / 1024l;
                     RequiredDownloadSize += ((int)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["size"]) / 1024f;
                     UpdateSharedData.Instance.DownloadList.Add(data);
@@ -411,6 +438,8 @@ namespace WebsiteWorkshop.Modules.UpdateModule
 
     public class DownloadAssetsProcedure : BaseProcedure
     {
+        private CoroutineQueue queue { get; set; }
+
         public override event Action OnError;
 
         public List<AssetDownloadData> ErrorList {
@@ -468,8 +497,9 @@ namespace WebsiteWorkshop.Modules.UpdateModule
             {
                 HandleAfterDownloadSuccess();
             }
+            ErrorList.Clear();
             // 协程请求数限制在100以下，因为：Curl error limit reached: 100 consecutive messages printed，由此推断UnityWebRequest的同时请求应该不超过这个值
-            var queue = new CoroutineQueue(100, UpdateSharedData.Instance.Processor.StartCoroutine);
+            queue = new CoroutineQueue(100, UpdateSharedData.Instance.Processor.StartCoroutine);
             queue.OnBatchComplete += () => {
                 bool isSuccess = true;
                 // 检验下载完整性
@@ -599,6 +629,149 @@ namespace WebsiteWorkshop.Modules.UpdateModule
             this.size = 0l;
             this.progress = 0f;
             isSuccess = false;
+        }
+    }
+
+    public class DownloadPackageProcedure : BaseProcedure
+    {
+        private CoroutineQueue queue { get; set; }
+        public DownloadPackageProcedure(BaseProcedure next) : base(next) { }
+        protected override bool CheckDependency()
+        {
+            return UpdateSharedData.Instance.Processor != null;
+        }
+        protected override void HandleProcedure()
+        {
+            string packageStr = (Resources.Load("Config/package") as TextAsset).text;
+            UpdateSharedData.Instance.RemotePackage = JsonMapper.ToObject(packageStr);
+            queue = new CoroutineQueue(100, UpdateSharedData.Instance.Processor.StartCoroutine);
+            queue.OnBatchComplete += () =>
+            {
+                Debug.Log("Download Package Done!");
+                PostProcedure();
+            };
+            List<string> temp = new List<string>();
+            foreach (var item in UpdateSharedData.Instance.RemotePackage["packages"])
+            {
+                Debug.Log(item);
+                temp.Add(item.ToString());
+            }
+            if (!Directory.Exists(EnvironmentVariables.UnzipAssetsRoot))
+            {
+                Directory.CreateDirectory(EnvironmentVariables.UnzipAssetsRoot);
+            }
+            if (!Directory.Exists(EnvironmentVariables.UnzipAssetsTemp))
+            {
+                Directory.CreateDirectory(EnvironmentVariables.UnzipAssetsTemp);
+            }
+            queue.RunBatch(temp.Select(packageUrl => GetPackageAndSave(packageUrl)));
+        }
+        private IEnumerator GetPackageAndSave(string packageUrl)
+        {
+            DownloadHandlerFile downloadHandler = new DownloadHandlerFile(Path.Combine(EnvironmentVariables.UnzipAssetsTemp, Path.GetFileName(new Uri(packageUrl).LocalPath)));
+            Debug.Log(Path.Combine(EnvironmentVariables.UnzipAssetsTemp, Path.GetFileName(new Uri(packageUrl).LocalPath)));
+            using (UnityWebRequest uwr = UnityWebRequest.Get(packageUrl))
+            {
+                uwr.certificateHandler = new UpdateCertificateHandler();
+                uwr.downloadHandler = downloadHandler;
+                uwr.SendWebRequest();
+                while (!uwr.isDone)
+                {
+                    Debug.LogFormat("{0} processing @{1}", packageUrl, uwr.downloadProgress);
+                    yield return new WaitForSeconds(1);
+                }
+                Debug.Log(packageUrl + "DONE!!!!!!!!!!!!!!!!!");
+            }
+        }
+
+        
+    }
+
+    public class UnzipProcedure : BaseProcedure
+    {
+        public UnzipProcedure(BaseProcedure next = null) : base(next) { }
+
+        protected override bool CheckDependency()
+        {
+            return UpdateSharedData.Instance.RemotePackage != null;
+        }
+
+        protected override void HandleProcedure()
+        {
+            DirectoryInfo di = new DirectoryInfo(EnvironmentVariables.UnzipAssetsTemp);
+            foreach (FileInfo zipedFile in di.GetFiles("*.zip"))
+            {
+                ExtractZipFile(zipedFile.FullName, EnvironmentVariables.UnzipAssetsRoot);
+                File.Delete(zipedFile.FullName);
+            }
+            Debug.Log("unzip complete!!!!!!!!!!");
+            PostProcedure();
+        }
+
+        private void ExtractZipFile(string archiveFilenameIn, string outFolder, string password = null)
+        {
+            ZipFile zf = null;
+            try
+            {
+                FileStream fs = File.OpenRead(archiveFilenameIn);
+                zf = new ZipFile(fs);
+                if (!string.IsNullOrEmpty(password))
+                {
+                    zf.Password = password;     // AES encrypted entries are handled automatically
+                }
+                foreach (ZipEntry zipEntry in zf)
+                {
+                    if (!zipEntry.IsFile)
+                    {
+                        continue;           // Ignore directories
+                    }
+                    string entryFileName = zipEntry.Name;
+                    // to remove the folder from the entry:- entryFileName = Path.GetFileName(entryFileName);
+                    // Optionally match entrynames against a selection list here to skip as desired.
+                    // The unpacked length is available in the zipEntry.Size property.
+
+                    byte[] buffer = new byte[4096];     // 4K is optimum
+                    Stream zipStream = zf.GetInputStream(zipEntry);
+
+                    // Manipulate the output filename here as desired.
+                    string fullZipToPath = Path.Combine(outFolder, entryFileName);
+                    string directoryName = Path.GetDirectoryName(fullZipToPath);
+                    if (directoryName.Length > 0)
+                        Directory.CreateDirectory(directoryName);
+
+                    // Unzip file in buffered chunks. This is just as fast as unpacking to a buffer the full size
+                    // of the file, but does not waste memory.
+                    // The "using" will close the stream even if an exception occurs.
+                    using (FileStream streamWriter = File.Create(fullZipToPath))
+                    {
+                        StreamUtils.Copy(zipStream, streamWriter, buffer);
+                    }
+                }
+            }
+            finally
+            {
+                if (zf != null)
+                {
+                    zf.IsStreamOwner = true; // Makes close also shut the underlying stream
+                    zf.Close(); // Ensure we release resources
+                }
+            }
+        }
+    }
+
+    public class DownloadNativeProcedure : BaseProcedure
+    {
+        public DownloadNativeProcedure(BaseProcedure next) : base(next) { }
+
+        protected override bool CheckDependency()
+        {
+            return UpdateSharedData.Instance.DownloadList != null
+                && UpdateSharedData.Instance.Activity != null;
+        }
+
+        protected override void HandleProcedure()
+        {
+            
         }
     }
 }
