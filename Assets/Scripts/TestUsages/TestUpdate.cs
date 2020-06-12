@@ -10,7 +10,8 @@ public class TestUpdate : MonoBehaviour
     {
         //NewUpdateSchedule();
         //OldUpdateSchedule();
-        AllUpdateSchedule();
+        //AllUpdateSchedule();
+        NativeUpdateSchedule();
     }
 
 
@@ -55,5 +56,25 @@ public class TestUpdate : MonoBehaviour
         DownloadPackageProcedure downloadPackageProcedure = new DownloadPackageProcedure(unzipProcedure);
 
         downloadPackageProcedure.StartProcedure();
+    }
+
+    public void NativeUpdateSchedule()
+    {
+        UpdateSharedData.Instance.Processor = this;
+
+        NoUpdateFinalProcedure noUpdateFinalProcedure = new NoUpdateFinalProcedure();
+        NativeDownloadProcedure nativeDownloadProcedure = new NativeDownloadProcedure();
+        AnalyzeCatalogProcedure analyzeCatalogProcedure = new AnalyzeCatalogProcedure(nativeDownloadProcedure);
+        DownloadCatalogProcedure downloadCatalogProcedure = new DownloadCatalogProcedure(analyzeCatalogProcedure);
+        ConfirmDownloadProcedure confirmDownloadProcedure = new ConfirmDownloadProcedure(downloadCatalogProcedure, noUpdateFinalProcedure);
+        RemoteProcedure remoteProcedure = new RemoteProcedure(confirmDownloadProcedure);
+        LocalProcedure localProcedure = new LocalProcedure(remoteProcedure);
+
+        localProcedure.StartProcedure();
+    }
+
+    public void OnDownloadDone()
+    {
+        Debug.Log("download done");
     }
 }

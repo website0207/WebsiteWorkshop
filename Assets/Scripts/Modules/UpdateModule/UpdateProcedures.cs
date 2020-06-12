@@ -55,18 +55,6 @@ namespace WebsiteWorkshop.Modules.UpdateModule
         /// </summary>
         public JsonData RemotePackage { get; set; }
 
-        public AndroidJavaObject Activity
-        {
-            get
-            {
-                if (_activity == null)
-                {
-                    _activity = new AndroidJavaClass("com.unity3d.player.UnityPlayer").GetStatic<AndroidJavaObject>("currentActivity");
-                }
-                return _activity;
-            }
-        }
-        private AndroidJavaObject _activity;
     }
 
     public class LocalProcedure : BaseProcedure
@@ -318,7 +306,7 @@ namespace WebsiteWorkshop.Modules.UpdateModule
     public class AnalyzeCatalogProcedure : BaseProcedure
     {
         public override event Action OnError;
-        public float RequiredDownloadSize { get; set; }
+        public int RequiredDownloadSize { get; set; }
         public AnalyzeCatalogProcedure(BaseProcedure next) : base(next) { }
         protected override bool CheckDependency()
         {
@@ -332,7 +320,7 @@ namespace WebsiteWorkshop.Modules.UpdateModule
         }
         private void AnalyzeDownloadList(IEnumerable<string> remoteKeys, IEnumerable<string> localKeys)
         {
-            RequiredDownloadSize = 0f;
+            RequiredDownloadSize = 0;
             UpdateSharedData.Instance.DownloadList.Clear();
             bool[] completeFlags = new bool[3] { false, false, false };
             Action onComplete = () =>
@@ -428,8 +416,8 @@ namespace WebsiteWorkshop.Modules.UpdateModule
                     {
                         data.uri2 = result.ToString();
                     }
-                    data.size = ((int)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["size"]) / 1024l;
-                    RequiredDownloadSize += ((int)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["size"]) / 1024f;
+                    data.size = ((int)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["size"]);
+                    RequiredDownloadSize += ((int)UpdateSharedData.Instance.RemoteCatalog["assets"][item]["size"]);
                     UpdateSharedData.Instance.DownloadList.Add(data);
                 }
             }
@@ -606,9 +594,9 @@ namespace WebsiteWorkshop.Modules.UpdateModule
         /// </summary>
         public string uri2 { get; set; }
         /// <summary>
-        /// 下载文件大小，单位kb
+        /// 下载文件大小，单位byte
         /// </summary>
-        public long size { get; set; }
+        public int size { get; set; }
         /// <summary>
         /// 文件下载进度，单位百分比
         /// </summary>
@@ -626,7 +614,7 @@ namespace WebsiteWorkshop.Modules.UpdateModule
         {
             this.uri1 = string.Empty;
             this.uri2 = string.Empty;
-            this.size = 0l;
+            this.size = 0;
             this.progress = 0f;
             isSuccess = false;
         }
@@ -759,19 +747,25 @@ namespace WebsiteWorkshop.Modules.UpdateModule
         }
     }
 
-    public class DownloadNativeProcedure : BaseProcedure
+    public class NativeDownloadProcedure : BaseProcedure
     {
-        public DownloadNativeProcedure(BaseProcedure next) : base(next) { }
+        public NativeDownloadProcedure(BaseProcedure next = null) : base(next) { }
 
         protected override bool CheckDependency()
         {
-            return UpdateSharedData.Instance.DownloadList != null
-                && UpdateSharedData.Instance.Activity != null;
+            return UpdateSharedData.Instance.DownloadList != null;
         }
 
         protected override void HandleProcedure()
         {
-            
+            List<string> passUrls = new List<string>();
+            int totalSize = 0;
+            foreach (var item in UpdateSharedData.Instance.DownloadList)
+            {
+                passUrls.Add(item.uri1);
+                totalSize += item.size;
+            }
+            SDKBridgeAdapter.DownloadFiles(passUrls.ToArray(), EnvironmentVariables.ExportAssetsRoot, totalSize);
         }
     }
 }
